@@ -2,7 +2,9 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
+	"unicode/utf8"
 
 	// homedir "github.com/mitchellh/go-homedir"
 	"github.com/spf13/cobra"
@@ -13,17 +15,19 @@ var cfgFile string
 var cFlag bool
 var lFlag bool
 var wFlag bool
+var mFlag bool
 
 func init() {
 	cobra.OnInitialize(initConfig)
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "default is $Home/ccwc.yml")
 	rootCmd.PersistentFlags().StringP("author", "a", "Desmond Opoku Mends", "Author name for copyright attribution")
-	rootCmd.PersistentFlags().BoolVarP(&cFlag, "count", "c", false, "Prints the number of bytes in a file")
+	rootCmd.PersistentFlags().BoolVarP(&cFlag, "bytes", "c", false, "Prints the number of bytes in a file")
 	rootCmd.PersistentFlags().BoolVarP(&lFlag, "lines", "l", false, "Prints the number of lines in a file")
 	rootCmd.PersistentFlags().BoolVarP(&wFlag, "words", "w", false, "Prints the number of words in a file")
+	rootCmd.PersistentFlags().BoolVarP(&mFlag, "chars", "m", false, "Prints the number of characters in a file(locale)")
 }
 
-func initConfig(){
+func initConfig() {
 	if cfgFile != "" {
 		viper.SetConfigFile(cfgFile)
 	} else {
@@ -43,37 +47,51 @@ func initConfig(){
 }
 
 var rootCmd = &cobra.Command{
-	Use: "ccwc",
+	Use:   "ccwc",
 	Short: "A word count (wc tool)",
 	Long: `A mordern day word count tool built with
 			cobra in go`,
-	Run: func (cmd *cobra.Command, args []string)  {
-		if len(args) == 0 {
-			fmt.Println("A file path is expected")
-			return
+	Run: func(cmd *cobra.Command, args []string) {
+		var file []byte
+		file_name := ""
+		fi, _ := os.Stdin.Stat()
+		if (fi.Mode() & os.ModeCharDevice) == 0 {
+			val, err := io.ReadAll(os.Stdin)
+			if err != nil {
+				fmt.Printf("Error reading piped value")
+			}
+			file = val
+		} else {
+			if args[0] == "" {
+				fmt.Print("A file path is expected")
+				return
+			}
+			file_name = args[0]
+			file, _ = os.ReadFile(file_name)
 		}
-		file_name := args[0]
-		file, err := os.ReadFile(file_name)
-		if err != nil {
-			fmt.Println("Error while reading file")
-			return 
-		}
-		count := countBytes(file)
+			
 		if cFlag {
-			fmt.Println(count, file_name)
-		}
-		lines := lineCount(file)
-		if lFlag {
-			fmt.Println(lines, file_name)
-		}
-		words := wordCount(file)
-		if wFlag {
-			fmt.Println(words, file_name)
+			bytes := countBytes(file)
+			fmt.Printf("\t%d %s", bytes, file_name)
+		} else if lFlag {
+			lines := lineCount(file)
+			fmt.Printf("\t%d %s", lines, file_name)
+		} else if wFlag {
+			words := wordCount(file)
+			fmt.Printf("\t%d %s", words, file_name)
+		} else if mFlag {
+			chars := charCount(file)
+			fmt.Printf("\t%d %s", chars, file_name)
+		} else {
+			bytes := countBytes(file)
+			lines := lineCount(file)
+			words := wordCount(file)
+			fmt.Printf("\t%d \t%d \t%d %s", lines, words, bytes, file_name)
 		}
 	},
-} 
+}
 
-func Execute(){
+func Execute() {
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Println(err)
 		os.Exit(1)
@@ -85,11 +103,11 @@ func countBytes(file []byte) int {
 	return len(file)
 }
 
-//Count the number of lines
+// Count the number of lines
 func lineCount(file []byte) int {
 	lines := 0
-	for _, b := range file{
-		if string(b) == "\n" || string(b) == "/r"{
+	for _, b := range file {
+		if string(b) == "\n" || string(b) == "/r" {
 			lines++
 		}
 	}
@@ -97,17 +115,17 @@ func lineCount(file []byte) int {
 }
 
 func wordCount(file []byte) int {
-	if len(file) == 0{
+	if len(file) == 0 {
 		return 0
 	}
 	words := 0
-	var inWord bool;
+	var inWord bool
 	for _, b := range file {
 		letter := string(b)
 		if letter == " " || letter == "\t" || letter == "\n" || letter == "\r" {
-			if inWord{
+			if inWord {
 				//we are outside a word now
-				words ++
+				words++
 				inWord = false
 			}
 		} else {
@@ -115,8 +133,12 @@ func wordCount(file []byte) int {
 			inWord = true
 		}
 	}
-	if (inWord){
+	if inWord {
 		words++
 	}
 	return words
+}
+
+func charCount(file []byte) int {
+	return utf8.RuneCount(file)
 }
